@@ -1,5 +1,6 @@
 import ollama
 import logging
+import tiktoken
 
 from typing import Union, List, Dict
 
@@ -36,10 +37,10 @@ def chat_llm(model: str, prompt_or_messages: Union[str, List[Dict]]) -> str:
         logging.error(f"LLM Error: {e}")
         return f"Error: LLM chat failed: {e}"
 
-def truncate_context(text: str, max_chars: int = 12000) -> str:
+def truncate_context(text: str, max_chars: int = 11000) -> str:
     """
     Truncates text to fit within token limits, preserving the start and end.
-    Aprox 12000 characters is roughly 3000-4000 tokens for Python code.
+    Aprox 11000 characters is roughly 3000-4000 tokens for Python code.
     """
     if not text or len(text) <= max_chars:
         return text

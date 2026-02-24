@@ -1,2 +1,3 @@
 DEFAULT_MODEL = "granite4:3b"
+SMART_MODEL = "qwen3:8b"
 CONTEXT_LIMIT = 4096

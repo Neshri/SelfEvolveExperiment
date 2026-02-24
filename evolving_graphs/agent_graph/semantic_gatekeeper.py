@@ -4,7 +4,7 @@ import logging
 import ast
 from typing import Tuple, Set, Optional, List
 
-from .agent_config import DEFAULT_MODEL
+from .agent_config import DEFAULT_MODEL, SMART_MODEL
 from .llm_util import chat_llm
 
 # --- Semantic Constraints ---
@@ -21,7 +21,7 @@ class SemanticGatekeeper:
     Acting as the firewall between the raw LLM output and the system state.
     """
     
-    def execute_with_feedback(self, initial_prompt: str, json_key: str, forbidden_terms: List[str] = [], verification_source: str = None, log_context: str = "General", expect_json: bool = True, min_words: int = 0) -> str:
+    def execute_with_feedback(self, initial_prompt: str, json_key: str, forbidden_terms: List[str] = [], verification_source: str = None, log_context: str = "General", expect_json: bool = True, min_words: int = 0, model: str = DEFAULT_MODEL) -> str:
         if expect_json:
             final_prompt = f"{initial_prompt}\n\nIMPORTANT: Return ONLY a valid JSON object with key '{json_key}'. No Markdown. Escape all double quotes inside strings."
         else:
@@ -35,9 +35,10 @@ class SemanticGatekeeper:
         MAX_RETRIES = 3 
         last_attempt_content = "[Analysis Failed]"
         last_warning = ""
-        
         for attempt in range(MAX_RETRIES + 1):
-            raw_response = chat_llm(DEFAULT_MODEL, messages)
+            # Use the bigger model if something goes wrong
+            if attempt > 1: model = SMART_MODEL
+            raw_response = chat_llm(model, messages)
             
             # --- PHASE 1: PARSE ---
             if expect_json:

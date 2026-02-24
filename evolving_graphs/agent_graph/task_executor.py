@@ -5,6 +5,7 @@ import logging
 from typing import Optional, Any, Tuple
 from .semantic_gatekeeper import SemanticGatekeeper
 from .llm_util import truncate_context
+from .agent_config import DEFAULT_MODEL, SMART_MODEL
 
 class TaskExecutor:
     def __init__(self, gatekeeper: SemanticGatekeeper):
@@ -127,7 +128,7 @@ class TaskExecutor:
 
         return None
 
-    def _audit_relevance(self, goal: str, answer: str, context_data: str, log_label: str) -> Tuple[str, str]:
+    def _audit_relevance(self, goal: str, answer: str, context_data: str, log_label: str, model: str = DEFAULT_MODEL) -> Tuple[str, str]:
         # --- 0. HEURISTIC CHECK (Fast & Strict) ---
         heuristic_error = self._heuristic_audit(answer)
         if heuristic_error:
@@ -161,7 +162,7 @@ class TaskExecutor:
         """
         
         raw = self.gatekeeper.execute_with_feedback(
-            prompt, "status", verification_source=None, log_context=f"{log_label}:Audit:Relevance", expect_json=True
+            prompt, "status", verification_source=None, log_context=f"{log_label}:Audit:Relevance", expect_json=True, model=model
         )
         data = self._clean_and_parse(raw, log_context=f"{log_label}:Audit:Relevance")
         
@@ -188,7 +189,7 @@ class TaskExecutor:
         
         return status, reason
 
-    def _audit_accuracy(self, answer: str, context_data: str, log_label: str) -> Tuple[str, str]:
+    def _audit_accuracy(self, answer: str, context_data: str, log_label: str, model: str = DEFAULT_MODEL) -> Tuple[str, str]:
         prompt = f"""
         You are a Code Auditor.
         
@@ -206,7 +207,7 @@ class TaskExecutor:
         """
         
         raw = self.gatekeeper.execute_with_feedback(
-            prompt, "status", verification_source=None, log_context=f"{log_label}:Audit:Accuracy", expect_json=True
+            prompt, "status", verification_source=None, log_context=f"{log_label}:Audit:Accuracy", expect_json=True, model=model
         )
         data = self._clean_and_parse(raw, log_context=f"{log_label}:Audit:Accuracy")
         
@@ -233,7 +234,7 @@ class TaskExecutor:
             
         return "PASS", "Verified"
 
-    def _refine_vague_answer(self, current_answer: str, context_data: str, log_label: str) -> str:
+    def _refine_vague_answer(self, current_answer: str, context_data: str, log_label: str, model: str = DEFAULT_MODEL) -> str:
         logging.info(f"[{log_label}] Triggering VAGUE refinement.")
         
         evidence_prompt = f"""
@@ -249,7 +250,7 @@ class TaskExecutor:
         """
         
         ev_raw = self.gatekeeper.execute_with_feedback(
-            evidence_prompt, "evidence", verification_source=None, log_context=f"{log_label}:Refine:Evidence", expect_json=True
+            evidence_prompt, "evidence", verification_source=None, log_context=f"{log_label}:Refine:Evidence", expect_json=True, model=model
         )
         
         ev_data = self._clean_and_parse(ev_raw)
@@ -272,7 +273,7 @@ class TaskExecutor:
         """
         
         rew_raw = self.gatekeeper.execute_with_feedback(
-            rewrite_prompt, "answer", verification_source=None, log_context=f"{log_label}:Refine:Rewrite", expect_json=True
+            rewrite_prompt, "answer", verification_source=None, log_context=f"{log_label}:Refine:Rewrite", expect_json=True, model=model
         )
         parsed = self._clean_and_parse(rew_raw)
         return self._unwrap_text(parsed)
@@ -290,8 +291,9 @@ class TaskExecutor:
     def _run_goal_loop(self, goal: str, context_data: str, log_label: str) -> str:
         feedback = ""
         current_answer = ""
-        
+        model = DEFAULT_MODEL
         for attempt in range(1, self.max_retries + 1):
+            if attempt > 1: model = SMART_MODEL
             iteration_label = f"{log_label}:Iter{attempt}"
             
             # --- 1. DRAFTER PHASE ---
@@ -331,18 +333,18 @@ class TaskExecutor:
             
             logging.info(f"[{iteration_label}] [DRAFTER_PROMPT_SENT]")
             current_answer_raw = self.gatekeeper.execute_with_feedback(
-                drafter_prompt, "answer", verification_source=None, log_context=f"{iteration_label}:Drafter", expect_json=True
+                drafter_prompt, "answer", verification_source=None, log_context=f"{iteration_label}:Drafter", expect_json=True, model=model
             )
             parsed = self._clean_and_parse(current_answer_raw, log_context=f"{iteration_label}:Drafter")
             current_answer = self._unwrap_text(parsed)
 
             # --- 2. RELEVANCE AUDIT (Includes Heuristic Check) ---
-            status, reason = self._audit_relevance(goal, current_answer, context_data, iteration_label)
+            status, reason = self._audit_relevance(goal, current_answer, context_data, iteration_label, model=model)
             
             # Special Handling for VAGUE (Marketing Fluff)
             if status == "VAGUE":
-                current_answer = self._refine_vague_answer(current_answer, context_data, iteration_label)
-                status, reason = self._audit_relevance(goal, current_answer, context_data, f"{iteration_label}:ReAudit")
+                current_answer = self._refine_vague_answer(current_answer, context_data, iteration_label, model=model)
+                status, reason = self._audit_relevance(goal, current_answer, context_data, f"{iteration_label}:ReAudit", model=model)
 
             if status == "FAIL":
                 logging.warning(f"[{log_label}] Relevance Audit Failed: {reason}")
@@ -350,7 +352,7 @@ class TaskExecutor:
                 continue
 
             # --- 3. ACCURACY AUDIT ---
-            status, reason = self._audit_accuracy(current_answer, context_data, iteration_label)
+            status, reason = self._audit_accuracy(current_answer, context_data, iteration_label, model=model)
             
             if status == "FAIL":
                 logging.warning(f"[{log_label}] Accuracy Audit Failed: {reason}")
